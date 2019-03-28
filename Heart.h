@@ -13,6 +13,7 @@ class Heart {
   private:
     int pin;
     Mood currentMood;
+    int fadeAmount;
 };
 
 #endif

@@ -2,8 +2,8 @@
 #include "Leg.h"
 #include "Adafruit_PWMServoDriver.h"
 
-#define SERVOMIN 150
-#define SERVOMAX 650
+#define SERVOMIN 90
+#define SERVOMAX 450
 
 Leg::Leg(Adafruit_PWMServoDriver pwmServoDriver, int servoPin, int limitSwitchPin, unsigned long timeToMoveForwardMs, bool reverse) {
   pwm = pwmServoDriver;
@@ -29,15 +29,21 @@ void Leg::periodicUpdate() {
     }
     pwm.setPWM(servo, 0, movingForward ? (flip ? SERVOMAX : SERVOMIN) : (flip ? SERVOMIN : SERVOMAX));
     previousLimitSwitch = currentLimitSwitch;
+  } else {
+    if (!zeroing) {
+      pwm.setPWM(servo, 0, 0);
+    }
   }
 }
 
 void Leg::zero() {
   movingForward = false;
+  zeroing = true;
   pwm.setPWM(servo, 0, isAtLimit() ? 0 : (flip ? SERVOMIN : SERVOMAX));
 }
 
 void Leg::runLeg(bool enable) {
+  zeroing = false;
   movingForward = true;
   enabled = enable;
 }

@@ -1,7 +1,6 @@
 #include "Adafruit_PWMServoDriver.h"
 #include "Leg.h"
 #include "Swerve.h"
-#include "Heart.h"
 #include "Head.h"
 #include "Tail.h"
 #include "SoftwareSerial.h"
@@ -11,10 +10,16 @@ unsigned long tracks[] = {2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 
 
 int track = 0;
 
-const int lightPin = A0;
-const int buttonPin = 12;
+const int robotSpeed = 50;
 
-typedef enum {FORWARD, AVOIDANCE, HUNTING, SPEAKING} Mode;
+const int hallEffectPin = 8;
+const int buttonPin = 12;
+const int leftPhotoresistor = A1;
+const int rightPhotoresistor = A2;
+const int ledPin = 13;
+const int ultrasonicPin = A0;
+
+typedef enum {FORWARD, AVOIDANCE, HUNTING, SPEAKING, FOLLOWING} Mode;
 
 Mode currentMode = FORWARD;
 
@@ -32,20 +37,20 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 SoftwareSerial softwareSerial(10, 11);
 DFRobotDFPlayerMini player;
 
-Leg frontLeft(pwm, 0, 2, 300, false);
-Leg frontRight(pwm, 1, 3, 300, true);
-Leg backLeft(pwm, 2, 4, 300, false);
-Leg backRight(pwm, 3, 5, 300, true);
+Leg frontLeft(pwm, 0,  2, 450, false);
+Leg frontRight(pwm, 9, 3, 450, true);
+Leg backLeft(pwm, 1, 4, 450, false);
+Leg backRight(pwm, 13, 5, 450, true);
 
-Swerve swerve(pwm, 14, 15, 11);
+Swerve swerve(pwm, 14, 15, 2);
 
-Tail tail(pwm, 12, 13);
+Tail tail(pwm, 12, 10);
 
-Head head(pwm, 10);
+Head head(pwm, 11);
 
 void setup() {
   Serial.begin(9600);
-  softwareSerial.begin(9600);
+  //softwareSerial.begin(9600);
   pwm.begin();
   pwm.setPWMFreq(60);
 
@@ -57,21 +62,21 @@ void setup() {
 
   randomSeed(analogRead(A5));
 
-  pinMode(7, OUTPUT);
-  pinMode(8, INPUT);
+  pinMode(ledPin, OUTPUT);
   pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(hallEffectPin, INPUT_PULLUP);
 
   swerve.setDrive(0, 0);
 
+  zero();
   while (!frontLeft.isAtLimit() || !frontRight.isAtLimit() || !backLeft.isAtLimit() || !backRight.isAtLimit()) {
     Serial.println("Zeroing legs");
-    frontLeft.zero();
-    frontRight.zero();
-    backLeft.zero();
-    backRight.zero();
+    zero();
     swerve.periodicUpdate();
     tail.periodicUpdate();
   } //TODO
+
+  Serial.println("All legs zeroed");
 
   moveLegs = true;//TODO
 }
@@ -79,26 +84,31 @@ void setup() {
 void loop() {
   unsigned long currentTime = millis();
   double distance = getDistance();
-  bool huntingTriggered = getLight() > 800;
+  bool huntingTriggered = getMagnetFood();
   bool buttonPressed = getButton();
+  bool followTriggered = getLightTriggered();
 
   switch (currentMode) {
     case FORWARD:
       if (buttonPressed && !preButtonPressed) {
-        Serial.println("Boring shit Triggered");
+        Serial.println("Speaking");
         currentMode = SPEAKING;
         moveLegs = false;
+      } else if (followTriggered) {
+        Serial.println("Following Triggered");
+        currentMode = FOLLOWING;
+        moveLegs = true;
       } else if (huntingTriggered) {
         Serial.println("Hunting Triggered");
         currentMode = HUNTING;
         moveLegs = false;
-      } else if (distance < 20) {
+      } else if (distance < 35) {
         Serial.println("Avoidance Triggered");
         currentMode = AVOIDANCE;
         moveLegs = false;
       } else {
         moveLegs = true;//TODO
-        swerve.setDrive(0, 100);
+        swerve.setDrive(0, robotSpeed);
       }
       break;
     case SPEAKING:
@@ -187,12 +197,25 @@ void loop() {
     case HUNTING:
       if (!huntingTriggered) {
         currentMode = AVOIDANCE;
+        digitalWrite(ledPin, LOW);
       } else {
-        if (head.getOpens() == -1) {
+        if (head.getOpens() < 0) {
           head.addOpens(2);
         }
+        digitalWrite(ledPin, HIGH);
         swerve.setDrive(0, 0);
         moveLegs = false;
+      }
+      break;
+    case FOLLOWING:
+      if (!followTriggered) {
+        currentMode = FORWARD;
+      } else {
+        int left = analogRead(leftPhotoresistor);
+        int right = analogRead(rightPhotoresistor);
+        double pos = (left - right) / (double) max(left, right);
+        Serial.println(pos);
+        swerve.setDrive(pos * 90, robotSpeed);
       }
       break;
   }
@@ -202,22 +225,26 @@ void loop() {
 }
 
 double getDistance() {
-  digitalWrite(7, LOW);
-  delayMicroseconds(5);
-  digitalWrite(7, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(7, LOW);
-
-  double distance = pulseIn(8, HIGH, 5000) / 29.1 / 2;
-  return distance <= 0 ? 200 : distance;
+  return 5.0 * analogRead(ultrasonicPin) / 10.0;
 }
 
-int getLight() {
-  return analogRead(lightPin);
+bool getMagnetFood() {
+  return !digitalRead(hallEffectPin);
 }
 
 bool getButton() {
   return !digitalRead(buttonPin);
+}
+
+void zero() {
+  frontLeft.zero();
+  frontRight.zero();
+  backLeft.zero();
+  backRight.zero();
+}
+
+bool getLightTriggered() {
+  return (analogRead(leftPhotoresistor) + analogRead(rightPhotoresistor)) > 300;
 }
 
 void allPeriodic() {
